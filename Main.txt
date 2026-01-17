@@ -1,8 +1,3 @@
---[[
-  DOOMSENSE v2 for outcome memories V0.2
-        by r3cup/doomsenseteam
-]]
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -13,10 +8,18 @@ local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local SoundService = game:GetService("SoundService")
+
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local IsScriptActive = true
 local Connections = {}
+
+-- ============================================================================
+-- CENTRAL SYNC CONTROLLER
+-- ============================================================================
+local SyncManager = {}
+SyncManager.Toggles = {} 
+SyncManager.Functions = {} 
 
 -- ============================================================================
 -- MOBILE CONTROL MODULE
@@ -25,7 +28,6 @@ local MobileControl = {}
 MobileControl.Buttons = {}
 MobileControl.IsMobile = false
 MobileControl.EditMode = false
-
 
 -- Assets
 local MOB_ICONS = {
@@ -38,13 +40,11 @@ local MOB_ICONS = {
     EditOn  = "rbxassetid://9735358798"
 }
 
--- Helper: Darken Color by percentage
 local function Darken(color, amount)
     local h, s, v = color:ToHSV()
     return Color3.fromHSV(h, s, math.clamp(v * (1 - amount), 0, 1))
 end
 
--- Device Check
 local function CheckDevice()
     if UserInputService.TouchEnabled and not UserInputService.MouseEnabled then
         return true
@@ -53,7 +53,6 @@ local function CheckDevice()
 end
 MobileControl.IsMobile = CheckDevice()
 
--- Main Button Creator
 function MobileControl:CreateButton(id, icon, defaultPos, callback)
     if self.Buttons[id] and self.Buttons[id].Frame then
         self.Buttons[id].Frame:Destroy()
@@ -138,7 +137,6 @@ function MobileControl:CreateButton(id, icon, defaultPos, callback)
             Accent = Color3.fromHex("4FD1C5"), 
             Stroke = Color3.fromRGB(30,30,30)
         }
-        
         Label.TextColor3 = Theme.Text
         Label.TextStrokeColor3 = Theme.Background
         IconImg.ImageColor3 = Theme.Text
@@ -153,28 +151,22 @@ function MobileControl:CreateButton(id, icon, defaultPos, callback)
             BackgroundColor3 = targetColor,
             BackgroundTransparency = targetTransp
         }):Play()
-        
         Stroke.Color = targetStroke
     end
 
     ClickHitbox.MouseButton1Click:Connect(function()
         if not self.EditMode then
-            isActive = not isActive
-            UpdateVisuals()
-            if callback then callback(isActive) end
-            if self.Buttons[id] then self.Buttons[id].State = isActive end
+            if callback then callback() end 
         end
     end)
 
+    -- Draggable Logic
     local dragging, dragInput, dragStart, startPos
     DragHitbox.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = Frame.Position
+            dragging = true; dragStart = input.Position; startPos = Frame.Position
         end
     end)
-    
     DragHitbox.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = input.Position - dragStart
@@ -182,25 +174,20 @@ function MobileControl:CreateButton(id, icon, defaultPos, callback)
             if self.Buttons[id] then self.Buttons[id].SavedPos = Frame.Position end
         end
     end)
-    
     DragHitbox.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
     end)
 
     self.Buttons[id] = {
         Frame = Frame, Rotator = Rotator, ClickHitbox = ClickHitbox, DragHitbox = DragHitbox,
-        Update = UpdateVisuals, State = isActive, SavedPos = Frame.Position
+        Update = UpdateVisuals, State = isActive, SavedPos = Frame.Position,
+        SetState = function(val) isActive = val; UpdateVisuals() end
     }
-    
     UpdateVisuals()
 end
 
 function MobileControl:UpdateAllThemes()
-    for _, btn in pairs(self.Buttons) do
-        if btn.Update then btn.Update() end
-    end
+    for _, btn in pairs(self.Buttons) do if btn.Update then btn.Update() end end
 end
 
 function MobileControl:ToggleEditMode(state)
@@ -220,34 +207,10 @@ function MobileControl:RefreshVisibility()
 end
 
 -- ============================================================================
--- LMS SYSTEM: LOGIC & DATA
+-- LMS SYSTEM
 -- ============================================================================
 local LMS_FOLDER = "Doomsense.custom.lms"
-
-local executor = (identifyexecutor or getexecutorname or function() return "Unknown" end)()
-local isDelta = string.find(string.lower(executor), "delta")
-local isXeno = string.find(string.lower(executor), "xeno")
-
-if not (isDelta or isXeno) then
-    warn("DOOMSENSE: Unsupported Executor detected (" .. executor .. ")")
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "DOOMSENSE WARNING",
-            Text = "Download Xeno or Delta for best experience",
-            Duration = 5,
-            Button1 = "OK"
-        })
-    end)
-end
-
-local LMS_State = { 
-    Enabled = false,
-    SelectedTrack = "AW SHUCKS",
-    Active = false, 
-    Volume = 1.2,
-    IsSequenceRunning = false
-}
-
+local LMS_State = { Enabled = false, SelectedTrack = "AW SHUCKS", Active = false, Volume = 1.2, IsSequenceRunning = false }
 local LMS_Library = {
     ["AW SHUCKS"] = "https://files.catbox.moe/s46doh.ogg",
     ["NO MORE GAME"] = "https://files.catbox.moe/1c4g8w.ogg",
@@ -259,35 +222,26 @@ local LMS_Library = {
     ["Beyond The Painting"] = "https://files.catbox.moe/j27pbt.ogg",
     ["BadTime"] = "https://files.catbox.moe/5tm79x.ogg"
 }
-
 local LMS_Originals = {
-    ["AmySolo"] = "rbxassetid://123535390530506",
-    ["BlazeSolo"] = "rbxassetid://132006407031162",
-    ["CreamSolo"] = "rbxassetid://101771084079612",
-    ["Eggmansolo"] = "rbxassetid://86981182369115",
-    ["KnucklesSolo"] = "rbxassetid://100259476227315",
-    ["MetalSonicSolo"] = "rbxassetid://82965945880276",
-    ["SilverSolo"] = "rbxassetid://77138683500819",
-    ["SonicSolo"] = "rbxassetid://136212496176401",
+    ["AmySolo"] = "rbxassetid://123535390530506", ["BlazeSolo"] = "rbxassetid://132006407031162",
+    ["CreamSolo"] = "rbxassetid://101771084079612", ["Eggmansolo"] = "rbxassetid://86981182369115",
+    ["KnucklesSolo"] = "rbxassetid://100259476227315", ["MetalSonicSolo"] = "rbxassetid://82965945880276",
+    ["SilverSolo"] = "rbxassetid://77138683500819", ["SonicSolo"] = "rbxassetid://136212496176401",
     ["TailsSolo"] = "rbxassetid://101018907191326"
 }
 
+-- LMS Helpers
 local function GetGameState()
-    if Workspace:FindFirstChild("GameProperties") and Workspace.GameProperties:FindFirstChild("State") then
-        return Workspace.GameProperties.State.Value
-    end
+    if Workspace:FindFirstChild("GameProperties") and Workspace.GameProperties:FindFirstChild("State") then return Workspace.GameProperties.State.Value end
     return "UNKNOWN"
 end
-
 local function GetSoloFolder()
-    return ReplicatedStorage:FindFirstChild("ClientAssets") 
-        and ReplicatedStorage.ClientAssets:FindFirstChild("Sounds")
-        and ReplicatedStorage.ClientAssets.Sounds:FindFirstChild("mus")
-        and ReplicatedStorage.ClientAssets.Sounds.mus:FindFirstChild("Game")
-        and ReplicatedStorage.ClientAssets.Sounds.mus.Game:FindFirstChild("Round")
-        and ReplicatedStorage.ClientAssets.Sounds.mus.Game.Round:FindFirstChild("SoloTheme")
+    local ca = ReplicatedStorage:FindFirstChild("ClientAssets")
+    if ca and ca:FindFirstChild("Sounds") and ca.Sounds:FindFirstChild("mus") and ca.Sounds.mus:FindFirstChild("Game") and ca.Sounds.mus.Game:FindFirstChild("Round") then
+        return ca.Sounds.mus.Game.Round:FindFirstChild("SoloTheme")
+    end
+    return nil
 end
-
 local function IsEXE(model)
     if not model then return false end
     local charAttr = model:GetAttribute("Character")
@@ -298,74 +252,53 @@ local function IsEXE(model)
     end
     return false
 end
-
 local function GetCustomAsset(path)
     if getcustomasset then return getcustomasset(path) end
     if getsynasset then return getsynasset(path) end
     return "" 
 end
-
 local function ApplyLMS(mode)
     local folder = GetSoloFolder()
     if not folder then return end
-
     if mode == "Default" then
         for name, id in pairs(LMS_Originals) do
             local s = folder:FindFirstChild(name)
-            if s then 
-                s.SoundId = id
-                s.Volume = 1.2 
-            end
+            if s then s.SoundId = id; s.Volume = 1.2 end
         end
     else
         local trackName = LMS_State.SelectedTrack
         local path = LMS_FOLDER .. "/" .. trackName .. ".ogg"
-        
         if isfile(path) then
             local customId = GetCustomAsset(path)
             for name, _ in pairs(LMS_Originals) do
                 local s = folder:FindFirstChild(name)
-                if s then 
-                    s.SoundId = customId 
-                    s.Volume = LMS_State.Volume
-                end
+                if s then s.SoundId = customId; s.Volume = LMS_State.Volume end
             end
         end
     end
 end
-
--- Download
+-- LMS Download & Loop
 task.spawn(function()
-    if not isfolder(LMS_FOLDER) then 
-        makefolder(LMS_FOLDER) 
-    end
-    
+    if not isfolder(LMS_FOLDER) then makefolder(LMS_FOLDER) end
     for name, url in pairs(LMS_Library) do
         local path = LMS_FOLDER .. "/" .. name .. ".ogg"
         if not isfile(path) then
             pcall(function()
                 local content = game:HttpGet(url)
-                if content and #content > 0 then
-                    writefile(path, content)
-                    print("DOOMSENSE: Downloaded " .. name)
-                end
+                if content and #content > 0 then writefile(path, content) end
             end)
-            if isDelta then task.wait(0.1) end
         end
     end
 end)
-
 task.spawn(function()
     while true do
         if not IsScriptActive then break end
         task.wait(0.5)
-        
         if LMS_State.Enabled and LocalPlayer.Character then
             local currentState = GetGameState()
             local survivors = {}
             local pFolder = Workspace:FindFirstChild("Players")
             local amIAlive = false
-            
             if pFolder then
                 for _, p in pairs(pFolder:GetChildren()) do
                     if not IsEXE(p) and p.Name ~= "Default" then 
@@ -374,56 +307,28 @@ task.spawn(function()
                     end
                 end
             end
-            
-            -- ON Only for ING or 80s
             local isGameRunning = (currentState == "ING" or currentState == "80s")
-            
             if isGameRunning and #survivors == 1 and amIAlive and not LMS_State.Active and not LMS_State.IsSequenceRunning then
-                LMS_State.Active = true
-                ApplyLMS("Custom")
+                LMS_State.Active = true; ApplyLMS("Custom")
             end
-
-            -- RE (Round End)
             if LMS_State.Active and currentState == "RE" and not LMS_State.IsSequenceRunning then
-                LMS_State.IsSequenceRunning = true
-                LMS_State.Active = false
-                
+                LMS_State.IsSequenceRunning = true; LMS_State.Active = false
                 local folder = GetSoloFolder()
                 local playingSound = nil
-                
-                if folder then
-                    for name, _ in pairs(LMS_Originals) do
-                        local s = folder:FindFirstChild(name)
-                        if s and s.Playing then 
-                            playingSound = s 
-                            break 
-                        end
-                    end
-                end
-
+                if folder then for name, _ in pairs(LMS_Originals) do local s = folder:FindFirstChild(name); if s and s.Playing then playingSound = s break end end end
                 if playingSound then
                     task.spawn(function()
-                        playingSound.IsMutedForCapture = true
-                        task.wait(20)
-                        playingSound.Playing = false
-                        playingSound.TimePosition = 0
-                        playingSound.IsMutedForCapture = false
-                        ApplyLMS("Default")
-                        LMS_State.IsSequenceRunning = false
+                        playingSound.IsMutedForCapture = true; task.wait(20)
+                        playingSound.Playing = false; playingSound.TimePosition = 0; playingSound.IsMutedForCapture = false
+                        ApplyLMS("Default"); LMS_State.IsSequenceRunning = false
                     end)
                 else
-                    ApplyLMS("Default")
-                    LMS_State.IsSequenceRunning = false
+                    ApplyLMS("Default"); LMS_State.IsSequenceRunning = false
                 end
             end
-            
-            -- RESET
             local isLobby = (currentState == "INT" or currentState == "SEC" or currentState == "MS")
-            
             if (isLobby or (isGameRunning and not amIAlive) or (isGameRunning and #survivors > 1)) and LMS_State.Active then
-                LMS_State.Active = false
-                LMS_State.IsSequenceRunning = false
-                ApplyLMS("Default")
+                LMS_State.Active = false; LMS_State.IsSequenceRunning = false; ApplyLMS("Default")
             end
         end
     end
@@ -438,7 +343,6 @@ local AppConfig = {
     AutoRing = false, ESP = false, Glow = false, PadESP = false,
     SelectedChar = "2011X", Noclip = false, Fly = false
 }
-
 local State = { IsFlying = false, IsSpeeding = false, SelectedPlayer = nil }
 
 local AnimDB = {
@@ -455,12 +359,10 @@ local AnimDB = {
     ["Kolossos"] = {{Name = "Point", Id = "140180851930686"}, {Name = "MissMe", Id = "81730809348394"}, {Name = "Metroman", Id = "107195453398060"}, {Name = "Laugh", Id = "102779996718354"}},
     ["TailsDoll"] = {{Name = "TripwireTime", Id = "112656139256072"}, {Name = "TripwireSit", Id = "92259033776440"}, {Name = "Imposter", Id = "100732265533480"}, {Name = "Caramel", Id = "81240310070946"}}
 }
-
 local NameToKey = { ["Tripwire"] = "TailsDoll" }
 local OrderedCharacters = {"2011X", "Tripwire", "Kolossos", "Metal Sonic", "Knuckles", "Eggman", "Cream", "Silver", "Sonic", "Blaze", "Tails", "Amy"}
 
 local BodyVel, BodyGyro, AnimTrack
-local T_Fly, T_Speed, T_Ring
 
 local function CleanPhysics()
     if BodyVel then BodyVel:Destroy() BodyVel = nil end
@@ -484,6 +386,7 @@ local function EnableFly()
     local root = char:FindFirstChild("HumanoidRootPart")
     if not hum or not root then return end
     CleanPhysics()
+    
     BodyVel = Instance.new("BodyVelocity", root)
     BodyVel.Name = "DoomVel"
     BodyVel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
@@ -499,57 +402,20 @@ end
 -- ============================================================================
 -- INTERNAL UI ENGINE
 -- ============================================================================
-
 local GUI = {}
 GUI.Objects = {}
 
 local CurrentThemes = {
-    ["Default"] = {
-        Background = Color3.fromRGB(43, 43, 43), Sidebar = Color3.fromRGB(43, 43, 43),
-        Element = Color3.fromRGB(50, 50, 50), Text = Color3.fromRGB(224, 224, 224),
-        TextDim = Color3.fromRGB(150, 150, 150), Accent = Color3.fromHex("4FD1C5"),
-        VerticalScroll = Color3.fromRGB(200, 200, 200), Stroke = Color3.fromRGB(30, 30, 30)
-    },
-    ["Red"] = {
-        Background = Color3.fromRGB(20, 20, 20), Sidebar = Color3.fromRGB(20, 20, 20),
-        Element = Color3.fromRGB(35, 35, 35), Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(180, 100, 100), Accent = Color3.fromRGB(255, 65, 65),
-        VerticalScroll = Color3.fromRGB(100, 50, 50), Stroke = Color3.fromRGB(50, 20, 20)
-    },
-     ["Full Blue"] = {
-        Background = Color3.fromRGB(15, 25, 35), Sidebar = Color3.fromRGB(15, 25, 35),
-        Element = Color3.fromRGB(30, 45, 60), Text = Color3.fromRGB(200, 230, 255),
-        TextDim = Color3.fromRGB(100, 150, 200), Accent = Color3.fromRGB(0, 160, 255),
-        VerticalScroll = Color3.fromRGB(50, 100, 150), Stroke = Color3.fromRGB(20, 40, 60)
-    },
-    ["Green"] = {
-        Background = Color3.fromRGB(17, 17, 17), Sidebar = Color3.fromRGB(12, 12, 12),
-        Element = Color3.fromRGB(25, 25, 25), Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(150, 150, 150), Accent = Color3.fromRGB(155, 205, 50),
-        VerticalScroll = Color3.fromRGB(155, 205, 50), Stroke = Color3.fromRGB(0, 0, 0)
-    },
-    ["Gold"] = {
-        Background = Color3.fromRGB(15, 15, 15), Sidebar = Color3.fromRGB(20, 20, 20),
-        Element = Color3.fromRGB(10, 10, 10), Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(180, 160, 100), Accent = Color3.fromRGB(255, 190, 0),
-        VerticalScroll = Color3.fromRGB(255, 190, 0), Stroke = Color3.fromRGB(40, 35, 20)
-    },
-    ["Full Dark"] = {
-        Background = Color3.fromRGB(10, 10, 10), Sidebar = Color3.fromRGB(5, 5, 5),
-        Element = Color3.fromRGB(20, 20, 20), Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(100, 100, 100), Accent = Color3.fromRGB(255, 255, 255),
-        VerticalScroll = Color3.fromRGB(30, 30, 30), Stroke = Color3.fromRGB(0, 0, 0)
-    },
-    ["Full purple"] = {
-        Background = Color3.fromRGB(18, 12, 28), Sidebar = Color3.fromRGB(14, 8, 22),
-        Element = Color3.fromRGB(30, 22, 45), Text = Color3.fromRGB(255, 255, 255),
-        TextDim = Color3.fromRGB(170, 150, 190), Accent = Color3.fromRGB(195, 35, 255),
-        VerticalScroll = Color3.fromRGB(195, 35, 255), Stroke = Color3.fromRGB(60, 40, 90)
-    }
+    ["Default"] = { Background = Color3.fromRGB(43, 43, 43), Sidebar = Color3.fromRGB(43, 43, 43), Element = Color3.fromRGB(50, 50, 50), Text = Color3.fromRGB(224, 224, 224), TextDim = Color3.fromRGB(150, 150, 150), Accent = Color3.fromHex("4FD1C5"), VerticalScroll = Color3.fromRGB(200, 200, 200), Stroke = Color3.fromRGB(30, 30, 30) },
+    ["Red"] = { Background = Color3.fromRGB(20, 20, 20), Sidebar = Color3.fromRGB(20, 20, 20), Element = Color3.fromRGB(35, 35, 35), Text = Color3.fromRGB(255, 255, 255), TextDim = Color3.fromRGB(180, 100, 100), Accent = Color3.fromRGB(255, 65, 65), VerticalScroll = Color3.fromRGB(100, 50, 50), Stroke = Color3.fromRGB(50, 20, 20) },
+    ["Full Blue"] = { Background = Color3.fromRGB(15, 25, 35), Sidebar = Color3.fromRGB(15, 25, 35), Element = Color3.fromRGB(30, 45, 60), Text = Color3.fromRGB(200, 230, 255), TextDim = Color3.fromRGB(100, 150, 200), Accent = Color3.fromRGB(0, 160, 255), VerticalScroll = Color3.fromRGB(50, 100, 150), Stroke = Color3.fromRGB(20, 40, 60) },
+    ["Green"] = { Background = Color3.fromRGB(17, 17, 17), Sidebar = Color3.fromRGB(12, 12, 12), Element = Color3.fromRGB(25, 25, 25), Text = Color3.fromRGB(255, 255, 255), TextDim = Color3.fromRGB(150, 150, 150), Accent = Color3.fromRGB(155, 205, 50), VerticalScroll = Color3.fromRGB(155, 205, 50), Stroke = Color3.fromRGB(0, 0, 0) },
+    ["Gold"] = { Background = Color3.fromRGB(15, 15, 15), Sidebar = Color3.fromRGB(20, 20, 20), Element = Color3.fromRGB(10, 10, 10), Text = Color3.fromRGB(255, 255, 255), TextDim = Color3.fromRGB(180, 160, 100), Accent = Color3.fromRGB(255, 190, 0), VerticalScroll = Color3.fromRGB(255, 190, 0), Stroke = Color3.fromRGB(40, 35, 20) },
+    ["Full Dark"] = { Background = Color3.fromRGB(10, 10, 10), Sidebar = Color3.fromRGB(5, 5, 5), Element = Color3.fromRGB(20, 20, 20), Text = Color3.fromRGB(255, 255, 255), TextDim = Color3.fromRGB(100, 100, 100), Accent = Color3.fromRGB(255, 255, 255), VerticalScroll = Color3.fromRGB(30, 30, 30), Stroke = Color3.fromRGB(0, 0, 0) },
+    ["Full purple"] = { Background = Color3.fromRGB(18, 12, 28), Sidebar = Color3.fromRGB(14, 8, 22), Element = Color3.fromRGB(30, 22, 45), Text = Color3.fromRGB(255, 255, 255), TextDim = Color3.fromRGB(170, 150, 190), Accent = Color3.fromRGB(195, 35, 255), VerticalScroll = Color3.fromRGB(195, 35, 255), Stroke = Color3.fromRGB(60, 40, 90) }
 }
-
 local CurrentTheme = CurrentThemes["Default"]
-_G.DoomsenseTheme = CurrentTheme -- Expose for Mobile Module
+_G.DoomsenseTheme = CurrentTheme
 local SelectedThemeName = "Default"
 
 function GUI:Create(class, props)
@@ -564,8 +430,7 @@ function GUI:MakeDraggable(topbar, frame)
     local dragging, dragInput, dragStart, startPos
     topbar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position; startPos = frame.Position
+            dragging = true; dragStart = input.Position; startPos = frame.Position
             input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
         end
     end)
@@ -582,32 +447,28 @@ end
 
 function GUI:InitWindow(title)
     if CoreGui:FindFirstChild("DoomsenseUI") then CoreGui.DoomsenseUI:Destroy() end
-    
     local ScreenGui = self:Create("ScreenGui", {Name = "DoomsenseUI", Parent = CoreGui, ZIndexBehavior = Enum.ZIndexBehavior.Sibling})
     
     local Main = self:Create("Frame", {
         Name = "Main", Parent = ScreenGui, Size = UDim2.fromOffset(600, 420),
         Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = CurrentTheme.Background, BackgroundTransparency = 0.05, BorderSizePixel = 0
+        BackgroundColor3 = CurrentTheme.Background, BackgroundTransparency = 0.05, BorderSizePixel = 0,
+        ClipsDescendants = true 
     })
 
-    -- [ИЗМЕНЕНИЕ: Синхронизация кнопки Menu с окном]
-    -- Если окно открывается/закрывается (в т.ч. через Insert), обновляем мобильную кнопку
+    -- [MODIFIED] REMOVED SCALE (As requested)
+    -- The UIScale logic has been removed so the menu stays full size on mobile
+
     Main:GetPropertyChangedSignal("Visible"):Connect(function()
         local isVisible = Main.Visible
         if MobileControl.Buttons["Menu"] then
-            -- Синхронизируем состояние кнопки
-            MobileControl.Buttons["Menu"].State = isVisible
-            -- Обновляем визуал (цвет/поворот)
-            MobileControl.Buttons["Menu"].Update()
+            MobileControl.Buttons["Menu"].SetState(isVisible)
         end
     end)
 
     local MouseFix = Instance.new("TextButton", Main)
-    MouseFix.Size = UDim2.new(1, 0, 1, 0)
-    MouseFix.BackgroundTransparency = 1
-    MouseFix.Text = ""
-    MouseFix.Modal = not (MobileControl.IsMobile)
+    MouseFix.Size = UDim2.new(1, 0, 1, 0);
+    MouseFix.BackgroundTransparency = 1; MouseFix.Text = ""; MouseFix.Modal = not (MobileControl.IsMobile);
     MouseFix.ZIndex = -1
 
     self:Create("UICorner", {CornerRadius = UDim.new(0, 8), Parent = Main})
@@ -621,74 +482,49 @@ function GUI:InitWindow(title)
     })
     self:MakeDraggable(TopBar, Main)
     
-    -- Controls Container
     local Controls = self:Create("Frame", {Parent = TopBar, Size = UDim2.new(0, 90, 1, 0), Position = UDim2.new(1, -90, 0, 0), BackgroundTransparency = 1})
     
-    -- EDIT BUTTON (Mobile)
     local EditBtn = self:Create("ImageButton", {
-        Parent = Controls, 
-        Size = UDim2.new(0, 20, 0, 20), 
-        -- Позиция будет настроена ниже в зависимости от устройства
-        Position = UDim2.new(0, 30, 0.5, -10),
-        BackgroundTransparency = 1, 
-        Image = MOB_ICONS.EditOff,
-        ImageColor3 = CurrentTheme.TextDim,
-        Visible = false -- По умолчанию скрыто, включим если Mobile
+        Parent = Controls, Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 60, 0.5, -10),
+        BackgroundTransparency = 1, Image = MOB_ICONS.EditOff, ImageColor3 = CurrentTheme.TextDim, Visible = MobileControl.IsMobile
     })
-
     local CloseBtn = self:Create("TextButton", {
         Parent = Controls, Text = "X", Size = UDim2.new(0, 30, 1, 0), Position = UDim2.new(0, 60, 0, 0),
-        BackgroundTransparency = 1, TextColor3 = CurrentTheme.TextDim, Font = Enum.Font.Gotham
+        BackgroundTransparency = 1, TextColor3 = CurrentTheme.TextDim, Font = Enum.Font.Gotham, Visible = not MobileControl.IsMobile
     })
     
-    -- [ИЗМЕНЕНИЕ 2: Логика отображения кнопок для Mobile vs PC]
-    if MobileControl.IsMobile then
-        -- Если с телефона: Скрываем X, ставим кнопку редактора на его место
-        CloseBtn.Visible = false
-        EditBtn.Visible = true
-        EditBtn.Position = UDim2.new(0, 60, 0.5, -10) -- Сдвигаем вправо на место X
-    else
-        -- Если ПК: Показываем X, скрываем редактор
-        CloseBtn.Visible = true
-        EditBtn.Visible = false
-    end
-
-    -- Edit Button Logic
     EditBtn.MouseButton1Click:Connect(function()
         MobileControl.EditMode = not MobileControl.EditMode
         EditBtn.Image = MobileControl.EditMode and MOB_ICONS.EditOn or MOB_ICONS.EditOff
         EditBtn.ImageColor3 = MobileControl.EditMode and CurrentTheme.Accent or CurrentTheme.TextDim
-        
-        -- Если мы в режиме редактирования, само меню можно скрыть или оставить, 
-        -- но X нам не нужен, так как мы на телефоне
         MobileControl:ToggleEditMode(MobileControl.EditMode)
     end)
-
-    CloseBtn.MouseButton1Click:Connect(function() 
-        Main.Visible = false
-    end)
+    CloseBtn.MouseButton1Click:Connect(function() Main.Visible = false end)
 
     local Sidebar = self:Create("Frame", {
-        Parent = Main, Size = UDim2.new(0, 150, 1, -35), Position = UDim2.new(0, 0, 0, 35),
-        BackgroundColor3 = CurrentTheme.Sidebar, BackgroundTransparency = 1, BorderSizePixel = 0
+       Parent = Main, Size = UDim2.new(0, 150, 1, -35), Position = UDim2.new(0, 0, 0, 35),
+       BackgroundColor3 = CurrentTheme.Sidebar, BackgroundTransparency = 1, BorderSizePixel = 0
     })
+   
     self:Create("UICorner", {CornerRadius = UDim.new(0, 8), Parent = Sidebar})
+    
+    -- [REQUEST 2] Sidebar Scrollbar = 0
     local TabContainer = self:Create("ScrollingFrame", {
         Parent = Sidebar, Size = UDim2.new(1, 0, 1, -20), Position = UDim2.new(0,0,0,10),
-        BackgroundTransparency = 1, ScrollBarThickness = 0, ScrollingEnabled = false
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 0, 
+        ScrollingEnabled = false,
     })
+
     self:Create("UIListLayout", {Parent = TabContainer, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5)})
+ 
     local ContentArea = self:Create("Frame", {
         Parent = Main, Size = UDim2.new(1, -160, 1, -45), Position = UDim2.new(0, 155, 0, 40),
         BackgroundTransparency = 1
     })
     
-    -- Обработка клавиши Insert для ПК (Toggle)
-    -- Мобильная кнопка сама обновится благодаря событию Main:GetPropertyChangedSignal("Visible")
     UserInputService.InputBegan:Connect(function(input, gpe)
-        if not gpe and input.KeyCode == Enum.KeyCode.Insert then 
-            Main.Visible = not Main.Visible 
-        end
+        if not gpe and input.KeyCode == Enum.KeyCode.Insert then Main.Visible = not Main.Visible end
     end)
     
     return {Gui = ScreenGui, TabContainer = TabContainer, ContentArea = ContentArea, Tabs = {}, CurrentTab = nil}
@@ -696,56 +532,118 @@ end
 
 function GUI:CreateTab(window, name, iconId)
     local TabBtn = self:Create("TextButton", {Parent = window.TabContainer, Size = UDim2.new(1, 0, 0, 35), BackgroundTransparency = 1, Text = ""})
-    local Indicator = self:Create("Frame", {
-        Parent = TabBtn, Size = UDim2.new(0, 3, 0.6, 0), Position = UDim2.new(0, 0, 0.2, 0),
-        BackgroundColor3 = CurrentTheme.Accent, BackgroundTransparency = 1
-    })
-    local Label = self:Create("TextLabel", {
-        Parent = TabBtn, Text = name, Size = UDim2.new(1, -25, 1, 0), Position = UDim2.new(0, 25, 0, 0),
-        BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left,
-        Font = Enum.Font.Gotham, TextSize = 13, TextColor3 = CurrentTheme.TextDim
-    })
-    if iconId then
-        self:Create("ImageLabel", {
-            Parent = TabBtn, Image = "rbxassetid://"..iconId, Size = UDim2.new(0, 16, 0, 16),
-            Position = UDim2.new(0, 5, 0.5, -8), BackgroundTransparency = 1, ImageColor3 = CurrentTheme.TextDim
-        })
-    end
+    local Indicator = self:Create("Frame", {Parent = TabBtn, Size = UDim2.new(0, 3, 0.6, 0), Position = UDim2.new(0, 0, 0.2, 0), BackgroundColor3 = CurrentTheme.Accent, BackgroundTransparency = 1})
+    local Label = self:Create("TextLabel", {Parent = TabBtn, Text = name, Size = UDim2.new(1, -25, 1, 0), Position = UDim2.new(0, 25, 0, 0), BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, Font = Enum.Font.Gotham, TextSize = 13, TextColor3 = CurrentTheme.TextDim})
+    if iconId then self:Create("ImageLabel", {Parent = TabBtn, Image = "rbxassetid://"..iconId, Size = UDim2.new(0, 16, 0, 16), Position = UDim2.new(0, 5, 0.5, -8), BackgroundTransparency = 1, ImageColor3 = CurrentTheme.TextDim}) end
+    
+    -- [REQUEST 3] Main Content Scrollbar (Thickness 0 -> Custom Logic)
     local Page = self:Create("ScrollingFrame", {
         Parent = window.ContentArea, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false, 
-        ScrollBarThickness = 2, ScrollBarImageColor3 = CurrentTheme.VerticalScroll, ScrollBarImageTransparency = 0, BorderSizePixel = 0
+        ScrollBarThickness = 0, -- Hide Default
+        BorderSizePixel = 0
     })
-    self:Create("UIListLayout", {Parent = Page, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8)})
-    self:Create("UIPadding", {Parent = Page, PaddingTop = UDim.new(0,5), PaddingLeft = UDim.new(0,5), PaddingRight = UDim.new(0,5)})
-    TabBtn.MouseButton1Click:Connect(function()
-        for _, t in pairs(window.Tabs) do
-            t.Page.Visible = false; t.Indicator.BackgroundTransparency = 1
-            TweenService:Create(t.Label, TweenInfo.new(0.2), {TextColor3 = CurrentTheme.TextDim}):Play()
+
+
+    -- Custom Scrollbar Construction
+    local ScrollContainer = Instance.new("Frame", window.ContentArea)
+    ScrollContainer.Size = UDim2.new(0, 9, 1, 0) -- 9px wide container
+    ScrollContainer.Position = UDim2.new(1, -9, 0, 0)
+    ScrollContainer.BackgroundTransparency = 1
+    ScrollContainer.Visible = false -- Sync with Page
+    
+    local ScrollThumbContainer = Instance.new("Frame", ScrollContainer)
+    ScrollThumbContainer.BackgroundTransparency = 1
+    ScrollThumbContainer.Size = UDim2.new(1, 0, 0, 50) -- Height is dynamic
+    
+    -- 1px Visual Line
+    local VisualLine = Instance.new("Frame", ScrollThumbContainer)
+    VisualLine.Size = UDim2.new(0, 1, 1, 0) -- 1px Width
+    VisualLine.Position = UDim2.new(0.5, 0, 0, 0)
+    VisualLine.AnchorPoint = Vector2.new(0.5, 0)
+    VisualLine.BackgroundColor3 = CurrentTheme.VerticalScroll
+    VisualLine.BorderSizePixel = 0
+    
+    -- 9px Hitbox (Invisible Button)
+    local Hitbox = Instance.new("TextButton", ScrollThumbContainer)
+    Hitbox.Size = UDim2.new(1, 0, 1, 0)
+    Hitbox.BackgroundTransparency = 1
+    Hitbox.Text = ""
+
+    -- Logic for Custom Scrollbar
+    local function UpdateScrollbar()
+        local contentSize = Page.AbsoluteCanvasSize.Y
+        local visibleSize = Page.AbsoluteWindowSize.Y
+        if contentSize > visibleSize then
+            ScrollContainer.Visible = Page.Visible
+            local ratio = visibleSize / contentSize
+            local thumbHeight = math.max(20, visibleSize * ratio)
+            ScrollThumbContainer.Size = UDim2.new(1, 0, 0, thumbHeight)
+            
+            local maxScroll = contentSize - visibleSize
+            local maxThumb = visibleSize - thumbHeight
+            local thumbPos = (Page.CanvasPosition.Y / maxScroll) * maxThumb
+            ScrollThumbContainer.Position = UDim2.new(0, 0, 0, thumbPos)
+        else
+            ScrollContainer.Visible = false
         end
-        Page.Visible = true; Indicator.BackgroundTransparency = 0
+    end
+
+    -- Events
+    Page:GetPropertyChangedSignal("CanvasPosition"):Connect(UpdateScrollbar)
+    Page:GetPropertyChangedSignal("AbsoluteCanvasSize"):Connect(UpdateScrollbar)
+    Page:GetPropertyChangedSignal("AbsoluteWindowSize"):Connect(UpdateScrollbar)
+    
+    -- Drag Logic
+    local dragging, dragStart, startY
+    Hitbox.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position.Y; startY = ScrollThumbContainer.Position.Y.Offset
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position.Y - dragStart
+            local maxThumb = ScrollContainer.AbsoluteSize.Y - ScrollThumbContainer.AbsoluteSize.Y
+            local newPos = math.clamp(startY + delta, 0, maxThumb)
+            
+            local maxScroll = Page.AbsoluteCanvasSize.Y - Page.AbsoluteWindowSize.Y
+            local scrollRatio = newPos / maxThumb
+            Page.CanvasPosition = Vector2.new(0, scrollRatio * maxScroll)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+
+    self:Create("UIListLayout", {Parent = Page, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8)})
+    self:Create("UIPadding", {Parent = Page, PaddingTop = UDim.new(0,5), PaddingLeft = UDim.new(0,5), PaddingRight = UDim.new(0,10)}) -- Added right padding for scrollbar
+    
+    TabBtn.MouseButton1Click:Connect(function()
+        for _, t in pairs(window.Tabs) do 
+            t.Page.Visible = false
+            if t.ScrollContainer then t.ScrollContainer.Visible = false end -- Hide others
+            t.Indicator.BackgroundTransparency = 1
+            TweenService:Create(t.Label, TweenInfo.new(0.2), {TextColor3 = CurrentTheme.TextDim}):Play() 
+        end
+        Page.Visible = true
+        UpdateScrollbar() -- Show this one
+        Indicator.BackgroundTransparency = 0
         TweenService:Create(Label, TweenInfo.new(0.2), {TextColor3 = CurrentTheme.Text}):Play()
     end)
-    if #window.Tabs == 0 then
-        Page.Visible = true; Indicator.BackgroundTransparency = 0; Label.TextColor3 = CurrentTheme.Text
+    if #window.Tabs == 0 then 
+        Page.Visible = true; UpdateScrollbar(); Indicator.BackgroundTransparency = 0; Label.TextColor3 = CurrentTheme.Text 
     end
-    local TabObj = {Page = Page, Indicator = Indicator, Label = Label}
+    
+    local TabObj = {Page = Page, Indicator = Indicator, Label = Label, ScrollContainer = ScrollContainer}
     table.insert(window.Tabs, TabObj)
 
     function TabObj:Section(text)
-        GUI:Create("TextLabel", {
-            Parent = Page, Text = text, Size = UDim2.new(1, 0, 0, 25), BackgroundTransparency = 1, TextColor3 = CurrentTheme.Text,
-            Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left
-        })
+        GUI:Create("TextLabel", {Parent = Page, Text = text, Size = UDim2.new(1, 0, 0, 25), BackgroundTransparency = 1, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left})
     end
     function TabObj:Button(text, callback)
-        local Btn = GUI:Create("TextButton", {
-            Parent = Page, Text = "", Size = UDim2.new(1, -5, 0, 35), BackgroundColor3 = CurrentTheme.Element, AutoButtonColor = false, BorderSizePixel = 0
-        })
+        local Btn = GUI:Create("TextButton", {Parent = Page, Text = "", Size = UDim2.new(1, -5, 0, 35), BackgroundColor3 = CurrentTheme.Element, AutoButtonColor = false, BorderSizePixel = 0})
         GUI:Create("UICorner", {CornerRadius = UDim.new(0, 6), Parent = Btn})
-        GUI:Create("TextLabel", {
-            Parent = Btn, Text = text, Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-            BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamMedium, TextSize = 13
-        })
+        GUI:Create("TextLabel", {Parent = Btn, Text = text, Size = UDim2.new(1, -30, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamMedium, TextSize = 13})
         Btn.MouseButton1Click:Connect(function()
             TweenService:Create(Btn, TweenInfo.new(0.1), {BackgroundColor3 = CurrentTheme.Accent}):Play()
             task.wait(0.1)
@@ -753,25 +651,18 @@ function GUI:CreateTab(window, name, iconId)
             if callback then callback() end
         end)
     end
-    function TabObj:Toggle(text, default, callback)
-        local Togl = GUI:Create("TextButton", {
-            Parent = Page, Text = "", Size = UDim2.new(1, -5, 0, 35), BackgroundColor3 = CurrentTheme.Element, AutoButtonColor = false, BorderSizePixel = 0
-        })
+    function TabObj:Toggle(id, text, default, callback)
+        local Togl = GUI:Create("TextButton", {Parent = Page, Text = "", Size = UDim2.new(1, -5, 0, 35), BackgroundColor3 = CurrentTheme.Element, AutoButtonColor = false, BorderSizePixel = 0})
         GUI:Create("UICorner", {CornerRadius = UDim.new(0, 6), Parent = Togl})
-        GUI:Create("TextLabel", {
-            Parent = Togl, Text = text, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-            BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamMedium, TextSize = 13
-        })
-        local SwitchBg = GUI:Create("Frame", {
-            Parent = Togl, Size = UDim2.new(0, 36, 0, 18), Position = UDim2.new(1, -45, 0.5, -9), BackgroundColor3 = Color3.fromRGB(30,30,30)
-        })
+        GUI:Create("TextLabel", {Parent = Togl, Text = text, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamMedium, TextSize = 13})
+        local SwitchBg = GUI:Create("Frame", {Parent = Togl, Size = UDim2.new(0, 36, 0, 18), Position = UDim2.new(1, -45, 0.5, -9), BackgroundColor3 = Color3.fromRGB(30,30,30)})
         GUI:Create("UICorner", {CornerRadius = UDim.new(1,0), Parent = SwitchBg})
-        local Knob = GUI:Create("Frame", {
-            Parent = SwitchBg, Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 2, 0.5, -7), BackgroundColor3 = Color3.fromRGB(150,150,150)
-        })
+        local Knob = GUI:Create("Frame", {Parent = SwitchBg, Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 2, 0.5, -7), BackgroundColor3 = Color3.fromRGB(150,150,150)})
         GUI:Create("UICorner", {CornerRadius = UDim.new(1,0), Parent = Knob})
+        
         local state = default or false
-        local function Update()
+        local function Update(val)
+            state = val
             if state then
                 TweenService:Create(SwitchBg, TweenInfo.new(0.2), {BackgroundColor3 = CurrentTheme.Accent}):Play()
                 TweenService:Create(Knob, TweenInfo.new(0.2), {Position = UDim2.new(1, -16, 0.5, -7), BackgroundColor3 = Color3.new(1,1,1)}):Play()
@@ -779,11 +670,24 @@ function GUI:CreateTab(window, name, iconId)
                 TweenService:Create(SwitchBg, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(30,30,30)}):Play()
                 TweenService:Create(Knob, TweenInfo.new(0.2), {Position = UDim2.new(0, 2, 0.5, -7), BackgroundColor3 = Color3.fromRGB(150,150,150)}):Play()
             end
-            if callback then callback(state) end
         end
-        if state then Update() end
-        Togl.MouseButton1Click:Connect(function() state = not state; Update() end)
-        return {SetValue = function(self, val) state = val; Update() end}
+        if state then Update(state) end
+        
+        if id then
+            SyncManager.Toggles[id] = { UpdateVisuals = function(self, s) Update(s) end }
+        end
+
+        Togl.MouseButton1Click:Connect(function()
+            if not id or id == "" then
+                 state = not state
+                 Update(state)
+                 if callback then callback(state) end
+             else
+                 if callback then callback() end
+            end
+        end)
+        
+        return {SetValue = function(self, val) Update(val) end}
     end
     function TabObj:Slider(text, min, max, default, callback)
         local SldFrame = GUI:Create("Frame", {
@@ -794,7 +698,6 @@ function GUI:CreateTab(window, name, iconId)
             Parent = SldFrame, Text = text, Size = UDim2.new(1, -20, 0, 20), Position = UDim2.new(0, 10, 0, 2),
             BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamMedium, TextSize = 13
         })
-        
         local ValLabel = GUI:Create("TextLabel", {
             Parent = SldFrame, Text = string.format("%.1f", default or min), Size = UDim2.new(0, 50, 0, 20), Position = UDim2.new(1, -60, 0, 2),
             BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = CurrentTheme.Text, Font = Enum.Font.Gotham, TextSize = 13
@@ -807,6 +710,11 @@ function GUI:CreateTab(window, name, iconId)
         GUI:Create("UICorner", {CornerRadius = UDim.new(1,0), Parent = Fill})
         local Knob = GUI:Create("Frame", {Parent = Fill, Size = UDim2.new(0,12,0,12), Position = UDim2.new(1,-6,0.5,-6), BackgroundColor3 = CurrentTheme.Accent})
         GUI:Create("UICorner", {CornerRadius = UDim.new(1,0), Parent = Knob})
+
+        local Hitbox = GUI:Create("TextButton", {
+            Parent = SldFrame, Text = "", Size = UDim2.new(1, 0, 1, 0), Position = UDim2.new(0,0,0,0), BackgroundTransparency = 1, ZIndex = 10
+        })
+
         local dragging = false
         local function Update(input)
             local sizeX = math.clamp((input.Position.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
@@ -815,32 +723,21 @@ function GUI:CreateTab(window, name, iconId)
             Fill.Size = UDim2.new(sizeX, 0, 1, 0)
             ValLabel.Text = string.format("%.1f", val)
             if callback then callback(val) end
-         end
+        end
         local pct = ((default or min) - min) / (max - min)
         Fill.Size = UDim2.new(pct, 0, 1, 0)
-        Bar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true Update(i) end end)
-        UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
-        UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then Update(i) end end)
+        
+        Hitbox.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = true; Update(i) end end)
+        UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
+        UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then Update(i) end end)
     end
     function TabObj:Dropdown(text, options, default, callback)
-        local DFrame = GUI:Create("Frame", {
-            Parent = Page, Size = UDim2.new(1, -5, 0, 35), BackgroundColor3 = CurrentTheme.Element, ClipsDescendants = true, ZIndex = 2
-        })
+        local DFrame = GUI:Create("Frame", {Parent = Page, Size = UDim2.new(1, -5, 0, 35), BackgroundColor3 = CurrentTheme.Element, ClipsDescendants = true, ZIndex = 2})
         GUI:Create("UICorner", {CornerRadius = UDim.new(0, 6), Parent = DFrame})
         local Header = GUI:Create("TextButton", {Parent = DFrame, Size = UDim2.new(1, 0, 0, 35), BackgroundTransparency = 1, Text = "", ZIndex = 3})
-        
- local SelLbl = GUI:Create("TextLabel", {
-            Parent = Header, Text = default, Size = UDim2.new(0.5, -30, 1, 0), Position = UDim2.new(0.5, 0, 0, 0),
-            BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = CurrentTheme.Text, Font = Enum.Font.Gotham, TextSize = 13, ZIndex = 3
-        })
-        GUI:Create("TextLabel", {
-            Parent = Header, Text = text, Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-            BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamMedium, TextSize = 13, ZIndex = 3
-        })
-        local Arrow = GUI:Create("TextLabel", {
-            Parent = Header, Text = "v", Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -25, 0, 0),
-            BackgroundTransparency = 1, TextColor3 = CurrentTheme.TextDim, Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 3
-        })
+        local SelLbl = GUI:Create("TextLabel", {Parent = Header, Text = default, Size = UDim2.new(0.5, -30, 1, 0), Position = UDim2.new(0.5, 0, 0, 0), BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = CurrentTheme.Text, Font = Enum.Font.Gotham, TextSize = 13, ZIndex = 3})
+        GUI:Create("TextLabel", {Parent = Header, Text = text, Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = CurrentTheme.Text, Font = Enum.Font.GothamMedium, TextSize = 13, ZIndex = 3})
+        local Arrow = GUI:Create("TextLabel", {Parent = Header, Text = "v", Size = UDim2.new(0, 20, 1, 0), Position = UDim2.new(1, -25, 0, 0), BackgroundTransparency = 1, TextColor3 = CurrentTheme.TextDim, Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 3})
         local Container = GUI:Create("Frame", {Parent = DFrame, Size = UDim2.new(1, 0, 0, 0), Position = UDim2.new(0,0,0,35), BackgroundTransparency = 1, ZIndex = 3})
         GUI:Create("UIListLayout", {Parent = Container, SortOrder = Enum.SortOrder.LayoutOrder})
         local isOpen = false
@@ -848,41 +745,64 @@ function GUI:CreateTab(window, name, iconId)
             for _, v in pairs(Container:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
             local count = 0
             for _, opt in pairs(newOpts) do
-                local Btn = GUI:Create("TextButton", {
-                    Parent = Container, Size = UDim2.new(1, 0, 0, 25), BackgroundTransparency = 1, Text = tostring(opt), TextColor3 = CurrentTheme.TextDim, Font = Enum.Font.Gotham, TextSize = 12, ZIndex = 4
-                })
+                local Btn = GUI:Create("TextButton", {Parent = Container, Size = UDim2.new(1, 0, 0, 25), BackgroundTransparency = 1, Text = tostring(opt), TextColor3 = CurrentTheme.TextDim, Font = Enum.Font.Gotham, TextSize = 12, ZIndex = 4})
                 Btn.MouseButton1Click:Connect(function()
-                    SelLbl.Text = tostring(opt)
-                    isOpen = false
-                    TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35)}):Play()
-                    Arrow.Text = "v"
+                    SelLbl.Text = tostring(opt); isOpen = false
+                    TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35)}):Play(); Arrow.Text = "v"
                     if callback then callback(opt) end
                 end)
                 count = count + 1
-             end
+            end
             return count
         end
         local count = BuildList(options)
         Header.MouseButton1Click:Connect(function()
             isOpen = not isOpen
-            if isOpen then
-                TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35 + (count * 25))}):Play()
-                Arrow.Text = "^"
-            else
-                TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35)}):Play()
-                Arrow.Text = "v"
-            end
+            if isOpen then TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35 + (count * 25))}):Play(); Arrow.Text = "^"
+            else TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35)}):Play(); Arrow.Text = "v" end
         end)
-        return {
-            SetValues = function(self, vals) 
-                options = vals; count = BuildList(vals)
-                if isOpen then TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35 + (count * 25))}):Play() end
-                if not vals or #vals == 0 then SelLbl.Text = "..." end
-            end,
-            SetValue = function(self, val) SelLbl.Text = tostring(val or "...") end
-          }
+        return {SetValues = function(self, vals) options = vals; count = BuildList(vals); if isOpen then TweenService:Create(DFrame, TweenInfo.new(0.3), {Size = UDim2.new(1, -5, 0, 35 + (count * 25))}):Play() end end}
     end
     return TabObj
+end
+
+-- ============================================================================
+-- CENTRAL CONTROL LOGIC IMPLEMENTATION
+-- ============================================================================
+
+-- Function to set state from ANY source (Key, Menu, Mobile Btn)
+local function SetCoreFeature(name, state)
+    -- 1. Execute Logic
+    if name == "Fly" then
+        State.IsFlying = state
+        AppConfig.Fly = state
+        if state then EnableFly() else CleanPhysics() end
+    elseif name == "Speed" then
+        State.IsSpeeding = state
+    elseif name == "ART" then
+        AppConfig.AutoRing = state
+        local msg = state and "ART ON (Wait for 80s State)" or "ART OFF"
+        game:GetService("StarterGui"):SetCore("SendNotification", {Title = "DOOMSENSE", Text = msg, Duration = 2})
+    elseif name == "Menu" then
+        local gui = CoreGui:FindFirstChild("DoomsenseUI")
+        local main = gui and gui:FindFirstChild("Main")
+        if main then main.Visible = state end
+    elseif name == "Taunt" and state == true then
+        SyncManager.Functions.PlayAnim()
+        task.delay(0.2, function()
+            if MobileControl.Buttons["Taunt"] then MobileControl.Buttons["Taunt"].SetState(false) end
+        end)
+    end
+
+    -- 2. Update Mobile Buttons Visuals
+    if MobileControl.Buttons[name] then
+        MobileControl.Buttons[name].SetState(state)
+    end
+
+    -- 3. Update Menu Toggle Visuals
+    if SyncManager.Toggles[name] then
+        SyncManager.Toggles[name]:UpdateVisuals(state)
+    end
 end
 
 -- ============================================================================
@@ -895,6 +815,7 @@ local CurrentScreenGui = nil
 local function DestroyInterface()
     if CurrentScreenGui then CurrentScreenGui:Destroy(); CurrentScreenGui = nil end
     GUI.Objects = {} 
+    SyncManager.Toggles = {}
 end
 
 local function LoadInterface()
@@ -915,122 +836,52 @@ local function LoadInterface()
     local TabVisuals = GUI:CreateTab(Window, "Visuals", "6031265978")
     local TabSettings = GUI:CreateTab(Window, "Settings", "10734950309")
 
-    -- [SETTINGS TAB]
+    -- [SETTINGS]
     TabSettings:Section("Custom LMS")
-
-    TabSettings:Toggle("Enable Custom LMS", LMS_State.Enabled, function(v)
-        LMS_State.Enabled = v
-        if not v then
-            LMS_State.Active = false
-            LMS_State.IsSequenceRunning = false
-            ApplyLMS("Default")
-        end
+    TabSettings:Toggle(nil, "Enable Custom LMS", LMS_State.Enabled, function(v) 
+        LMS_State.Enabled = v; if not LMS_State.Enabled then ApplyLMS("Default") end 
     end)
+    TabSettings:Slider("LMS Volume", 1.2, 5.0, LMS_State.Volume, function(v) LMS_State.Volume = v; if LMS_State.Enabled then ApplyLMS("Custom") end end)
+    local lmsOptions = {} for name, _ in pairs(LMS_Library) do table.insert(lmsOptions, name) end; table.sort(lmsOptions)
+    TabSettings:Dropdown("Select Track", lmsOptions, LMS_State.SelectedTrack, function(val) LMS_State.SelectedTrack = val; if LMS_State.Enabled then ApplyLMS("Custom") end end)
 
-    -- SLIDER 1.2 - 5.0
-    TabSettings:Slider("LMS Volume", 1.2, 5.0, LMS_State.Volume, function(v)
-        LMS_State.Volume = v
-        if LMS_State.Enabled then ApplyLMS("Custom") end
-    end)
-
-    local lmsOptions = {}
-    for name, _ in pairs(LMS_Library) do table.insert(lmsOptions, name) end
-    table.sort(lmsOptions)
-
-    TabSettings:Dropdown("Select Track", lmsOptions, LMS_State.SelectedTrack, function(val)
-        LMS_State.SelectedTrack = val
-        if LMS_State.Enabled then ApplyLMS("Custom") end
-    end)
-
-    -- [SETTINGS TAB]
     TabSettings:Section("Theme Customization")
-    local CurrentThemeList = {}
-    for name, _ in pairs(CurrentThemes) do table.insert(CurrentThemeList, name) end
+    local CurrentThemeList = {} for name, _ in pairs(CurrentThemes) do table.insert(CurrentThemeList, name) end
+    TabSettings:Dropdown("Select Theme", CurrentThemeList, SelectedThemeName, function(val) SelectedThemeName = val end)
+    TabSettings:Button("Reload Menu (Apply Theme)", function() CurrentTheme = CurrentThemes[SelectedThemeName]; _G.DoomsenseTheme = CurrentTheme; LoadInterface() end)
+    TabSettings:Button("REJOIN SERVER", function() if #Players:GetPlayers() <= 1 then TeleportService:Teleport(game.PlaceId, LocalPlayer) else TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end end)
 
-    TabSettings:Dropdown("Select Theme", CurrentThemeList, SelectedThemeName, function(val)
-        SelectedThemeName = val
-    end)
-
-    TabSettings:Button("Reload Menu (Apply Theme)", function()
-        CurrentTheme = CurrentThemes[SelectedThemeName]
-        _G.DoomsenseTheme = CurrentTheme
-        LoadInterface()
-    end)
-    
-    TabSettings:Button("REJOIN SERVER", function()
-        if #Players:GetPlayers() <= 1 then
-            TeleportService:Teleport(game.PlaceId, LocalPlayer)
-        else
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-        end
-    end)
-
-    -- [MAIN TAB]
+    -- [MAIN]
     TabMain:Section("Movement")
-    T_Fly = TabMain:Toggle("Flight (G)", State.IsFlying, function(v)
-        State.IsFlying = v
-        AppConfig.Fly = v
-        if v then EnableFly() else CleanPhysics() end
-    end)
-
-    T_Speed = TabMain:Toggle("SpeedHack (C)", State.IsSpeeding, function(v) State.IsSpeeding = v end)
-    TabMain:Toggle("Noclip", AppConfig.Noclip, function(v) AppConfig.Noclip = v end)
+    TabMain:Toggle("Fly", "Flight (G)", State.IsFlying, function() SetCoreFeature("Fly", not State.IsFlying) end)
+    TabMain:Toggle("Speed", "SpeedHack (C)", State.IsSpeeding, function() SetCoreFeature("Speed", not State.IsSpeeding) end)
+    
+    TabMain:Toggle(nil, "Noclip", AppConfig.Noclip, function(v) AppConfig.Noclip = v end)
     TabMain:Slider("Fly Speed", 20, 200, AppConfig.FlySpeed, function(v) AppConfig.FlySpeed = v end)
     TabMain:Slider("Walk Speed", 16, 150, AppConfig.WalkSpeed, function(v) AppConfig.WalkSpeed = v end)
 
     TabMain:Section("Automation")
-    T_Ring = TabMain:Toggle("Auto Ring Teleport (T)", AppConfig.AutoRing, function(v) 
-        AppConfig.AutoRing = v 
-        if v then
-            game:GetService("StarterGui"):SetCore("SendNotification", {Title = "DOOMSENSE", Text = "ART ON (Wait for 80s State)", Duration = 2})
-        else
-            game:GetService("StarterGui"):SetCore("SendNotification", {Title = "DOOMSENSE", Text = "ART OFF", Duration = 2})
-        end
-    end)
-    
-    TabMain:Toggle("No Cooldown Jump", AppConfig.NoCDJump, function(v) 
+    TabMain:Toggle("ART", "Auto Ring Teleport (T)", AppConfig.AutoRing, function() SetCoreFeature("ART", not AppConfig.AutoRing) end)
+    TabMain:Toggle(nil, "No Cooldown Jump", AppConfig.NoCDJump, function(v) 
         AppConfig.NoCDJump = v
-        
-        if Connections["JumpCDLoop"] then 
-            Connections["JumpCDLoop"]:Disconnect() 
-            Connections["JumpCDLoop"] = nil 
-        end
-
-        if v then
-            Connections["JumpCDLoop"] = game:GetService("RunService").Heartbeat:Connect(function()
+        if Connections["JumpCDLoop"] then Connections["JumpCDLoop"]:Disconnect(); Connections["JumpCDLoop"] = nil end
+        if AppConfig.NoCDJump then
+            Connections["JumpCDLoop"] = RunService.Heartbeat:Connect(function()
                 if not AppConfig.NoCDJump then return end
-                
                 local char = LocalPlayer.Character
                 local hum = char and char:FindFirstChildOfClass("Humanoid")
-                
                 if hum and char:FindFirstChild("HumanoidRootPart") then
-                    -- 1. Jump Properties
-                    hum.UseJumpPower = true
-                    hum.JumpPower = 50 
-                    hum.JumpHeight = 7.2 
-                    
-                    -- 2. Unlock States
-                    hum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-                    
-                    -- 3. Bhop
+                    hum.UseJumpPower = true; hum.JumpPower = 50; hum.JumpHeight = 7.2; hum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
                     local state = hum:GetState()
-                    if state == Enum.HumanoidStateType.Landed or state == Enum.HumanoidStateType.FallingDown then
-                        hum:ChangeState(Enum.HumanoidStateType.Running)
-                    end
-
-                    -- 4. Attribute Reset
-                    if char:GetAttribute("JumpCD") then 
-                        char:SetAttribute("JumpCD", false) 
-                    end
-                    if char:GetAttribute("CanJump") == false then 
-                        char:SetAttribute("CanJump", true) 
-                    end
+                    if state == Enum.HumanoidStateType.Landed or state == Enum.HumanoidStateType.FallingDown then hum:ChangeState(Enum.HumanoidStateType.Running) end
+                    if char:GetAttribute("JumpCD") then char:SetAttribute("JumpCD", false) end
+                    if char:GetAttribute("CanJump") == false then char:SetAttribute("CanJump", true) end
                 end
             end)
         end
     end)
 
-    -- [TELEPORT TAB]
+    -- [TELEPORT]
     TabTeleport:Section("Players")
     local function GetPlayerList()
         local list = {}
@@ -1043,16 +894,8 @@ local function LoadInterface()
         end
         return list
     end
-    local PlayerDropdown = TabTeleport:Dropdown("Select Player", GetPlayerList(), nil, function(val)
-        if val then
-            local username = string.split(val, " | ")[1]
-            State.SelectedPlayer = username
-        end
-    end)
-    TabTeleport:Button("Refresh Players", function()
-        PlayerDropdown:SetValues(GetPlayerList())
-        PlayerDropdown:SetValue(nil)
-    end)
+    local PlayerDropdown = TabTeleport:Dropdown("Select Player", GetPlayerList(), nil, function(val) if val then State.SelectedPlayer = string.split(val, " | ")[1] end end)
+    TabTeleport:Button("Refresh Players", function() PlayerDropdown:SetValues(GetPlayerList()); PlayerDropdown:SetValue(nil) end)
     TabTeleport:Button("Teleport", function()
         if State.SelectedPlayer then
             local p = Players:FindFirstChild(State.SelectedPlayer)
@@ -1062,15 +905,11 @@ local function LoadInterface()
         end
     end)
 
-    -- [ANIMATIONS TAB]
-    local SelectedAnimChar = "2011X"
-    local SelectedAnimName = ""
-    local AnimListDropdown
+    -- [ANIMATIONS]
+    local SelectedAnimChar = "2011X"; local SelectedAnimName = ""; local AnimListDropdown
     TabAnim:Section("Configuration")
     TabAnim:Dropdown("Character Assets", OrderedCharacters, "2011X", function(v)
-        SelectedAnimChar = v
-        local dbKey = NameToKey[v] or v
-        local anims = AnimDB[dbKey]
+        SelectedAnimChar = v; local dbKey = NameToKey[v] or v; local anims = AnimDB[dbKey]
         local names = {}
         if anims then for _, a in pairs(anims) do table.insert(names, a.Name) end end
         AnimListDropdown:SetValues(names)
@@ -1078,11 +917,7 @@ local function LoadInterface()
     AnimListDropdown = TabAnim:Dropdown("Select Animation", {}, "...", function(v) SelectedAnimName = v end)
 
     local function ToggleAnim()
-        if AnimTrack and AnimTrack.IsPlaying then
-            AnimTrack:Stop()
-            return
-        end
-        
+        if AnimTrack and AnimTrack.IsPlaying then AnimTrack:Stop() return end
         local dbKey = NameToKey[SelectedAnimChar] or SelectedAnimChar
         if AnimDB[dbKey] and SelectedAnimName ~= "" then
             for _, anim in pairs(AnimDB[dbKey]) do
@@ -1092,34 +927,28 @@ local function LoadInterface()
                     if hum then
                         local animator = hum:FindFirstChild("Animator") or Instance.new("Animator", hum)
                         if AnimTrack then AnimTrack:Stop() end
-                        
-                        local a = Instance.new("Animation")
-                        a.AnimationId = "rbxassetid://" .. anim.Id
-                        AnimTrack = animator:LoadAnimation(a)
-                        AnimTrack.Priority = Enum.AnimationPriority.Action4
-                        AnimTrack:Play()
+                        local a = Instance.new("Animation"); a.AnimationId = "rbxassetid://" .. anim.Id
+                        AnimTrack = animator:LoadAnimation(a); AnimTrack.Priority = Enum.AnimationPriority.Action4; AnimTrack:Play()
                     end
                     break
                 end
             end
         end
     end
+    SyncManager.Functions.PlayAnim = ToggleAnim -- Expose to SyncManager
 
-    TabAnim:Button("Play Animation (R)", function()
-        ToggleAnim()
-    end)
+    TabAnim:Button("Play Animation (R)", function() ToggleAnim() end)
 
     UserInputService.InputBegan:Connect(function(input, gpe)
         if gpe then return end
         if input.KeyCode == Enum.KeyCode.R then ToggleAnim() end
-        if input.KeyCode == Enum.KeyCode.Insert then Main.Visible = not Main.Visible end
     end)
 
-    -- [VISUALS TAB]
+    -- [VISUALS]
     TabVisuals:Section("ESP")
-    TabVisuals:Toggle("Player ESP", AppConfig.ESP, function(v) AppConfig.ESP = v end)
-    TabVisuals:Toggle("EXE Glow", AppConfig.Glow, function(v) AppConfig.Glow = v end)
-    TabVisuals:Toggle("Pad ESP (Yellow)", AppConfig.PadESP, function(v) AppConfig.PadESP = v end)
+    TabVisuals:Toggle(nil, "Player ESP", AppConfig.ESP, function(v) AppConfig.ESP = v end)
+    TabVisuals:Toggle(nil, "EXE Glow", AppConfig.Glow, function(v) AppConfig.Glow = v end)
+    TabVisuals:Toggle(nil, "Pad ESP (Yellow)", AppConfig.PadESP, function(v) AppConfig.PadESP = v end)
     TabVisuals:Section("Effects")
     TabVisuals:Button("Remove Water Effects", function()
         local cam = Workspace.CurrentCamera
@@ -1127,52 +956,41 @@ local function LoadInterface()
         if cam:FindFirstChild("WaterCorrection") then cam.WaterCorrection:Destroy() end
         game:GetService("StarterGui"):SetCore("SendNotification", {Title="DOOMSENSE", Text="Water Effects Deleted", Duration=2})
     end)
-    TabVisuals:Toggle("Fullbright", false, function(v)
+    TabVisuals:Toggle(nil, "Fullbright", false, function(v)
         Lighting.Ambient = v and Color3.new(1,1,1) or Color3.new(0,0,0)
     end)
 
-    -- MOBILE BUTTONS INITIALIZATION
+    -- ========================================================================
+    -- MOBILE SYNC & PERSISTENCE
+    -- ========================================================================
+    
     MobileControl:RefreshVisibility()
-
-    -- 1. MENU BUTTON
-    MobileControl:CreateButton("Menu", MOB_ICONS.Menu, UDim2.new(1, -70, 0.15, 0), function(isActive)
-        local MainFrame = CurrentScreenGui and CurrentScreenGui:FindFirstChild("Main")
-        if MainFrame then
-            MainFrame.Visible = isActive 
-        end
+   
+    -- [MODIFIED] POSITIONED ON RIGHT SIDE (VERTICAL STACK)
+    -- Position: UDim2.new(1, -60, Y, Offset) -> Anchored to right edge
+    local StartY = 0.35
+    
+    MobileControl:CreateButton("Menu", MOB_ICONS.Menu, UDim2.new(1, -60, StartY, 0), function()
+        SetCoreFeature("Menu", not (MainFrame.Visible))
+    end)
+    MobileControl:CreateButton("Fly", MOB_ICONS.Fly, UDim2.new(1, -60, StartY, 60), function()
+        SetCoreFeature("Fly", not State.IsFlying)
+    end)
+    MobileControl:CreateButton("Speed", MOB_ICONS.Speed, UDim2.new(1, -60, StartY, 120), function()
+        SetCoreFeature("Speed", not State.IsSpeeding)
+    end)
+    MobileControl:CreateButton("ART", MOB_ICONS.ART, UDim2.new(1, -60, StartY, 180), function()
+        SetCoreFeature("ART", not AppConfig.AutoRing)
+    end)
+    MobileControl:CreateButton("Taunt", MOB_ICONS.Taunt, UDim2.new(1, -60, StartY, 240), function()
+        SetCoreFeature("Taunt", true)
     end)
 
-    -- 2. FLY BUTTON
-    MobileControl:CreateButton("Fly", MOB_ICONS.Fly, UDim2.new(1, -70, 0.15, 55), function(isActive)
-        State.IsFlying = isActive
-        AppConfig.Fly = isActive
-        if T_Fly then T_Fly:SetValue(isActive) end
-        if isActive then EnableFly() else CleanPhysics() end
-    end)
-
-    -- 3. SPEED BUTTON
-    MobileControl:CreateButton("Speed", MOB_ICONS.Speed, UDim2.new(1, -70, 0.15, 110), function(isActive)
-        State.IsSpeeding = isActive
-        if T_Speed then T_Speed:SetValue(isActive) end
-    end)
-
-    -- 4. ART BUTTON
-    MobileControl:CreateButton("ART", MOB_ICONS.ART, UDim2.new(1, -70, 0.15, 165), function(isActive)
-        AppConfig.AutoRing = isActive
-        if T_Ring then T_Ring:SetValue(isActive) end
-    end)
-
-    -- 5. TAUNT BUTTON
-    MobileControl:CreateButton("Taunt", MOB_ICONS.Taunt, UDim2.new(1, -70, 0.15, 220), function(isActive)
-        ToggleAnim()
-        task.delay(0.2, function()
-            local btn = MobileControl.Buttons["Taunt"]
-            if btn then 
-                btn.State = false 
-                btn.Update() 
-            end
-        end)
-    end)
+    -- FORCE SYNC STATE AFTER RELOAD
+    if MobileControl.Buttons["Fly"] then MobileControl.Buttons["Fly"].SetState(State.IsFlying) end
+    if MobileControl.Buttons["Speed"] then MobileControl.Buttons["Speed"].SetState(State.IsSpeeding) end
+    if MobileControl.Buttons["ART"] then MobileControl.Buttons["ART"].SetState(AppConfig.AutoRing) end
+    if MobileControl.Buttons["Menu"] then MobileControl.Buttons["Menu"].SetState(MainFrame.Visible) end
     
     MobileControl:UpdateAllThemes()
 end
@@ -1183,9 +1001,9 @@ end
 
 table.insert(Connections, UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
-    if input.KeyCode == Enum.KeyCode.G then if T_Fly then T_Fly:SetValue(not State.IsFlying) end end
-    if input.KeyCode == Enum.KeyCode.C then if T_Speed then T_Speed:SetValue(not State.IsSpeeding) end end
-    if input.KeyCode == Enum.KeyCode.T then if T_Ring then T_Ring:SetValue(not AppConfig.AutoRing) end end
+    if input.KeyCode == Enum.KeyCode.G then SetCoreFeature("Fly", not State.IsFlying) end
+    if input.KeyCode == Enum.KeyCode.C then SetCoreFeature("Speed", not State.IsSpeeding) end
+    if input.KeyCode == Enum.KeyCode.T then SetCoreFeature("ART", not AppConfig.AutoRing) end
 end))
 
 RunService.Stepped:Connect(function()
@@ -1195,9 +1013,7 @@ RunService.Stepped:Connect(function()
     if not root or not hum then return end
 
     if AppConfig.Noclip then
-        for _, p in pairs(LocalPlayer.Character:GetDescendants()) do
-            if p:IsA("BasePart") then p.CanCollide = false end
-        end
+        for _, p in pairs(LocalPlayer.Character:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end
     end
 
     if State.IsFlying and BodyVel then
@@ -1224,14 +1040,8 @@ RunService:BindToRenderStep("DoomFlyLoop", Enum.RenderPriority.Camera.Value + 1,
     if root and not root:FindFirstChild("DoomVel") then EnableFly() return end
 end)
 
-local VisualsFolder = Instance.new("Folder", CoreGui)
-VisualsFolder.Name = "DoomsenseVisuals"
-
-local RAGE_MUSIC_IDS = {
-    "12803522657",
-    "9057530869",
-    "72233377540950" 
-}
+local VisualsFolder = Instance.new("Folder", CoreGui); VisualsFolder.Name = "DoomsenseVisuals"
+local RAGE_MUSIC_IDS = { "12803522657", "9057530869", "72233377540950" }
 
 -- VISUALS LOOP
 task.spawn(function()
@@ -1240,145 +1050,75 @@ task.spawn(function()
         task.wait(0.5)
         VisualsFolder:ClearAllChildren()
         
-        -- 1. Game State
         local currentState = "UNKNOWN"
-        if Workspace:FindFirstChild("GameProperties") and Workspace.GameProperties:FindFirstChild("State") then
-            currentState = Workspace.GameProperties.State.Value
-        end
+        if Workspace:FindFirstChild("GameProperties") and Workspace.GameProperties:FindFirstChild("State") then currentState = Workspace.GameProperties.State.Value end
         local isRoundActive = (currentState == "ING" or currentState == "80s")
 
         if isRoundActive then
             local myChar = LocalPlayer.Character
             local isRageMusic = false
-            
-            -- Rage Mode
             if myChar and myChar.Name == "2011x" then
                 for _, s in pairs(SoundService:GetDescendants()) do
                     if s:IsA("Sound") and s.Playing then
                         for _, id in pairs(RAGE_MUSIC_IDS) do
-                            if string.find(tostring(s.SoundId), id) then
-                                isRageMusic = true
-                                break
-                            end
+                            if string.find(tostring(s.SoundId), id) then isRageMusic = true; break end
                         end
                     end
                     if isRageMusic then break end
                 end
-                
                 if isRageMusic then
                     for _, part in pairs(myChar:GetChildren()) do
-                        if part:IsA("BasePart") then
-                            part.Material = Enum.Material.Neon
-                            part.Color = Color3.fromRGB(255, 0, 0)
-                        elseif part:IsA("Accessory") and part:FindFirstChild("Handle") then
-                             part.Handle.Color = Color3.fromRGB(255, 0, 0)
-                             part.Handle.Material = Enum.Material.Neon
-                        end
+                        if part:IsA("BasePart") then part.Material = Enum.Material.Neon; part.Color = Color3.fromRGB(255, 0, 0)
+                        elseif part:IsA("Accessory") and part:FindFirstChild("Handle") then part.Handle.Color = Color3.fromRGB(255, 0, 0); part.Handle.Material = Enum.Material.Neon end
                     end
-                    if myChar:FindFirstChild("Head") and myChar.Head:FindFirstChild("face") then
-                        myChar.Head.face.Texture = "rbxassetid://6341235966"
-                    end
+                    if myChar:FindFirstChild("Head") and myChar.Head:FindFirstChild("face") then myChar.Head.face.Texture = "rbxassetid://6341235966" end
                 end
             end
 
-            -- ESP 
             if AppConfig.ESP or AppConfig.Glow then
                 for _, p in pairs(Players:GetPlayers()) do
                     if p ~= LocalPlayer then
                         local pModel = p.Character or (Workspace:FindFirstChild("Players") and Workspace.Players:FindFirstChild(p.Name))
-                        
                         if pModel and pModel:FindFirstChild("HumanoidRootPart") then
                             local isExe = IsEXE(pModel)
-                            
-                            -- Highlight ESP
                             if AppConfig.ESP then
                                 local color = isExe and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(0, 255, 0)
-                                local hl = Instance.new("Highlight", VisualsFolder)
-                                hl.Adornee = pModel
-                                hl.FillColor = color
-                                hl.OutlineColor = Color3.new(1,1,1)
-                                hl.FillTransparency = 0.5
+                                local hl = Instance.new("Highlight", VisualsFolder); hl.Adornee = pModel; hl.FillColor = color; hl.OutlineColor = Color3.new(1,1,1); hl.FillTransparency = 0.5
                             end
-
-                            -- Text EXE
                             if isExe and AppConfig.ESP then
-                                local targetPart = pModel:FindFirstChild("Head") 
-                                    or pModel:FindFirstChild("face") 
-                                    or pModel:FindFirstChild("Torso") 
-                                    or pModel:FindFirstChild("UpperTorso") 
-                                    or pModel.HumanoidRootPart
-
+                                local targetPart = pModel:FindFirstChild("Head") or pModel:FindFirstChild("face") or pModel:FindFirstChild("Torso") or pModel:FindFirstChild("UpperTorso") or pModel.HumanoidRootPart
                                 if targetPart then
-                                    local bg = Instance.new("BillboardGui", VisualsFolder)
-                                    bg.Adornee = targetPart
-                                    bg.Size = UDim2.new(0, 100, 0, 50)
-                                    bg.StudsOffset = Vector3.new(0, 4, 0)
-                                    bg.AlwaysOnTop = true
-                                    
-                                    local txtExe = Instance.new("TextLabel", bg)
-                                    txtExe.Size = UDim2.new(1, 0, 0.5, 0)
-                                    txtExe.Position = UDim2.new(0, 0, 0.4, 0)
-                                    txtExe.BackgroundTransparency = 1
-                                    txtExe.Text = "EXE"
-                                    txtExe.TextColor3 = Color3.fromRGB(255, 0, 0)
-                                    txtExe.TextStrokeColor3 = Color3.new(0, 0, 0)
-                                    txtExe.TextStrokeTransparency = 0
-                                    txtExe.Font = Enum.Font.Arcade
-                                    txtExe.TextSize = 25
-
-                                    -- Rage Label Logic
+                                    local bg = Instance.new("BillboardGui", VisualsFolder); bg.Adornee = targetPart; bg.Size = UDim2.new(0, 100, 0, 50); bg.StudsOffset = Vector3.new(0, 4, 0); bg.AlwaysOnTop = true
+                                    local txtExe = Instance.new("TextLabel", bg); txtExe.Size = UDim2.new(1, 0, 0.5, 0); txtExe.Position = UDim2.new(0, 0, 0.4, 0); txtExe.BackgroundTransparency = 1; txtExe.Text = "EXE";
+                                    txtExe.TextColor3 = Color3.fromRGB(255, 0, 0); txtExe.TextStrokeColor3 = Color3.new(0, 0, 0); txtExe.TextStrokeTransparency = 0; txtExe.Font = Enum.Font.Arcade; txtExe.TextSize = 25
                                     local isRage = false
-                                    if pModel.HumanoidRootPart:FindFirstChild("RageFill") then 
-                                        isRage = true
-                                    elseif Workspace:FindFirstChild("Assets") and Workspace.Assets:FindFirstChild("Songs") and Workspace.Assets.Songs:FindFirstChild("Rage") then 
-                                        isRage = true 
-                                    end
-
+                                    if pModel.HumanoidRootPart:FindFirstChild("RageFill") then isRage = true
+                                    elseif Workspace:FindFirstChild("Assets") and Workspace.Assets:FindFirstChild("Songs") and Workspace.Assets.Songs:FindFirstChild("Rage") then isRage = true end
                                     local charName = pModel:GetAttribute("Character") or pModel.Name
                                     if string.find(string.lower(charName), "2011x") and isRage then
-                                        local txtRage = Instance.new("TextLabel", bg)
-                                        txtRage.Size = UDim2.new(1, 0, 0.5, 0)
-                                        txtRage.Position = UDim2.new(0, 0, 0, 0)
-                                        txtRage.BackgroundTransparency = 1
-                                        txtRage.Text = "RAGE"
-                                        txtRage.TextColor3 = Color3.fromRGB(255, 170, 0)
-                                        txtRage.TextStrokeColor3 = Color3.new(0,0,0)
-                                        txtRage.TextStrokeTransparency = 0
-                                        txtRage.Font = Enum.Font.Arcade
-                                        txtRage.TextSize = 20
+                                        local txtRage = Instance.new("TextLabel", bg); txtRage.Size = UDim2.new(1, 0, 0.5, 0); txtRage.Position = UDim2.new(0, 0, 0, 0); txtRage.BackgroundTransparency = 1; txtRage.Text = "RAGE";
+                                        txtRage.TextColor3 = Color3.fromRGB(255, 170, 0); txtRage.TextStrokeColor3 = Color3.new(0,0,0); txtRage.TextStrokeTransparency = 0; txtRage.Font = Enum.Font.Arcade; txtRage.TextSize = 20
                                     end
                                 end
                             end
-                            
-                            -- Glow Logic
                             if AppConfig.Glow and isExe then
-                                local hl = Instance.new("Highlight", VisualsFolder)
-                                hl.Adornee = pModel
-                                hl.FillTransparency = 1
-                                hl.OutlineColor = Color3.new(1,0,0)
+                                local hl = Instance.new("Highlight", VisualsFolder); hl.Adornee = pModel; hl.FillTransparency = 1; hl.OutlineColor = Color3.new(1,0,0)
                             end
                         end
                     end
                 end
             end
-
-            -- Pad ESP
             if AppConfig.PadESP and Workspace:FindFirstChild("Maps") then
                 for _, obj in pairs(Workspace.Maps:GetDescendants()) do
                     if obj.Name == "Pad" and obj:IsA("BasePart") then
-                        local hl = Instance.new("Highlight", VisualsFolder)
-                        hl.Adornee = obj
-                        hl.FillColor = Color3.new(1,1,0)
-                        hl.OutlineColor = Color3.new(1,1,0)
+                        local hl = Instance.new("Highlight", VisualsFolder); hl.Adornee = obj; hl.FillColor = Color3.new(1,1,0); hl.OutlineColor = Color3.new(1,1,0)
                     end
                 end
             end
-            
             if AppConfig.AutoRing and currentState == "80s" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 for _, v in pairs(Workspace:GetDescendants()) do
                     if v:IsA("MeshPart") and v.MeshId == "rbxassetid://106058960373684" then
-                        LocalPlayer.Character.HumanoidRootPart.CFrame = v.CFrame + Vector3.new(0,3,0)
-                        break
+                        LocalPlayer.Character.HumanoidRootPart.CFrame = v.CFrame + Vector3.new(0,3,0); break
                     end
                 end
             end
@@ -1387,9 +1127,3 @@ task.spawn(function()
 end)
 
 LoadInterface()
-print("██████╗░░█████╗░░█████╗░███╗░░░███╗░██████╗███████╗███╗░░██╗░██████╗███████╗ ██╗░░░██╗██████╗░")
-print("██╔══██╗██╔══██╗██╔══██╗████╗░████║██╔════╝██╔════╝████╗░██║██╔════╝██╔════╝ ██║░░░██║╚════██╗")
-print("██║░░██║██║░░██║██║░░██║██╔████╔██║╚█████╗░█████╗░░██╔██╗██║╚█████╗░█████╗░░ ╚██╗░██╔╝░░███╔═╝")
-print("██║░░██║██║░░██║██║░░██║██║╚██╔╝██║░╚═══██╗██╔══╝░░██║╚████║░╚═══██╗██╔══╝░░ ░╚████╔╝░██╔══╝░░")
-print("██████╔╝╚█████╔╝╚█████╔╝██║░╚═╝░██║██████╔╝███████╗██║░╚███║██████╔╝███████╗ ░░╚██╔╝░░███████╗")
-print("╚═════╝░░╚════╝░░╚════╝░╚═╝░░░░░╚═╝╚═════╝░╚══════╝╚═╝░░╚══╝╚═════╝░╚══════╝ ░░░╚═╝░░░╚══════╝")
