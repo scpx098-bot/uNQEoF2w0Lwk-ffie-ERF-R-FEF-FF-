@@ -1135,38 +1135,35 @@ local function LoadInterface()
     MobileControl:RefreshVisibility()
 
     -- 1. MENU BUTTON
-    MobileControl:CreateButton("Menu", MOB_ICONS.Menu, UDim2.new(1, -70, 0.2, 0), function(isActive)
+    MobileControl:CreateButton("Menu", MOB_ICONS.Menu, UDim2.new(1, -70, 0.15, 0), function(isActive)
         local MainFrame = CurrentScreenGui and CurrentScreenGui:FindFirstChild("Main")
         if MainFrame then
-            -- Прямая установка: Если кнопка горит (isActive), меню должно быть видно
             MainFrame.Visible = isActive 
         end
     end)
 
     -- 2. FLY BUTTON
-    MobileControl:CreateButton("Fly", MOB_ICONS.Fly, UDim2.new(1, -70, 0.2, 60), function(isActive)
+    MobileControl:CreateButton("Fly", MOB_ICONS.Fly, UDim2.new(1, -70, 0.15, 55), function(isActive)
         State.IsFlying = isActive
         AppConfig.Fly = isActive
-        if T_Fly then T_Fly:SetValue(isActive) end -- Sync with GUI toggle
+        if T_Fly then T_Fly:SetValue(isActive) end
         if isActive then EnableFly() else CleanPhysics() end
     end)
 
     -- 3. SPEED BUTTON
-    MobileControl:CreateButton("Speed", MOB_ICONS.Speed, UDim2.new(1, -70, 0.2, 120), function(isActive)
+    MobileControl:CreateButton("Speed", MOB_ICONS.Speed, UDim2.new(1, -70, 0.15, 110), function(isActive)
         State.IsSpeeding = isActive
         if T_Speed then T_Speed:SetValue(isActive) end
     end)
 
     -- 4. ART BUTTON
-    MobileControl:CreateButton("ART", MOB_ICONS.ART, UDim2.new(1, -70, 0.2, 180), function(isActive)
+    MobileControl:CreateButton("ART", MOB_ICONS.ART, UDim2.new(1, -70, 0.15, 165), function(isActive)
         AppConfig.AutoRing = isActive
         if T_Ring then T_Ring:SetValue(isActive) end
-        if isActive then
-        end
     end)
 
     -- 5. TAUNT BUTTON
-    MobileControl:CreateButton("Taunt", MOB_ICONS.Taunt, UDim2.new(1, -70, 0.2, 240), function(isActive)
+    MobileControl:CreateButton("Taunt", MOB_ICONS.Taunt, UDim2.new(1, -70, 0.15, 220), function(isActive)
         ToggleAnim()
         task.delay(0.2, function()
             local btn = MobileControl.Buttons["Taunt"]
